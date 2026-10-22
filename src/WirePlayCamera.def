@@ -1,0 +1,10 @@
+; Exports for the WirePlay virtual camera (DirectShow source filter).
+; Without this file (or __declspec(dllexport)) MSVC keeps the COM entry
+; points internal to the DLL: regsvr32 then reports "DllRegisterServer
+; entry point not found" and no application can ever see the camera.
+LIBRARY WirePlayCamera
+EXPORTS
+    DllCanUnloadNow     PRIVATE
+    DllGetClassObject   PRIVATE
+    DllRegisterServer   PRIVATE
+    DllUnregisterServer PRIVATE

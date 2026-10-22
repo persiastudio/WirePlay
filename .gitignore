@@ -1,0 +1,8 @@
+build/
+dist/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.bin
+*.h265
+*.h264

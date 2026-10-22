@@ -1,0 +1,11 @@
+GNU GENERAL PUBLIC LICENSE
+Version 3, 29 June 2007
+
+The WirePlay engine (wireplay_engine.py) is a derivative work of
+pymobiledevice3 <https://github.com/doronz88/pymobiledevice3>, which is licensed
+under GPL-3.0-or-later, and is therefore distributed under the same licence.
+
+The full text of the GNU General Public License version 3 is available at:
+    https://www.gnu.org/licenses/gpl-3.0.txt
+
+A copy should be distributed alongside this file as gpl-3.0.txt.

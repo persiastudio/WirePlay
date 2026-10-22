@@ -1,0 +1,110 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    name: Windows x64
+    # windows-latest is windows-2025, which ships Visual Studio Enterprise 2022
+    # (17.14) and CMake 3.30.5 / 3.31.5 / 4.1.2 -- checked against the runner
+    # image manifest. None of those CMake versions know the "Visual Studio 18
+    # 2026" generator (added in CMake 4.2), so CI builds with the 2022 generator.
+    # VS 2026 is what developers use locally; see the vs2026 preset.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: lukka/get-cmake@latest
+
+      - name: vcpkg build
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: 664933b8d385dfc01f4e0cdff4c7c74e71f6a740
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+          -DCMAKE_TOOLCHAIN_FILE=${{ env.VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake
+          -DVCPKG_TARGET_TRIPLET=x64-windows
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      # The camera is built but deliberately not registered: regsvr32 writes to
+      # HKLM and a CI runner has no use for a registered filter.
+      - name: Verify the camera filter built
+        shell: pwsh
+        run: |
+          if (-not (Test-Path build/Release/WirePlayCamera.dll)) {
+            throw "WirePlayCamera.dll was not built"
+          }
+          Get-Item build/Release/WirePlayCamera.dll | Select-Object Name, Length
+
+      - name: Unit tests
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Bundle
+        shell: pwsh
+        run: |
+          $out = "dist/WirePlay"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Copy-Item build/Release/wireplay.exe $out/
+          # FFmpeg and SDL2 are LGPL/zlib shared libraries; they ship as DLLs so
+          # the link stays dynamic and the licences stay satisfied.
+          #
+          # vcpkg.json puts this build in manifest mode, so the packages land in
+          # the build tree under vcpkg_installed/ -- NOT under $VCPKG_ROOT/installed,
+          # which only exists for classic mode. An earlier version of this step
+          # read the classic path, which does not exist here, and because GitHub's
+          # pwsh shell runs with $ErrorActionPreference = 'Stop' the failed
+          # Get-ChildItem aborted the whole step.
+          $dlls = Get-ChildItem "build/vcpkg_installed/x64-windows/bin" -Filter *.dll |
+                  Where-Object { $_.Name -match '^(avcodec|avutil|avformat|swscale|swresample|SDL2)' }
+          if (-not $dlls) {
+            throw "no FFmpeg/SDL2 DLLs found under build/vcpkg_installed/x64-windows/bin"
+          }
+          Copy-Item $dlls $out/
+          # The virtual camera is only built when the SDK's DirectShow
+          # baseclasses are present, so its absence must not fail the bundle.
+          if (Test-Path build/Release/WirePlayCamera.dll) {
+            Copy-Item build/Release/WirePlayCamera.dll $out/
+          }
+          Copy-Item engine/wireplay_engine.py $out/
+          Copy-Item LICENSE README.md $out/
+          Get-ChildItem $out | Select-Object Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WirePlay-win-x64
+          path: dist/WirePlay
+
+  linux-tests:
+    name: Linux (unit tests only)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cmake libsdl2-dev \
+            libavcodec-dev libavutil-dev libswscale-dev libswresample-dev
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build --parallel
+      - run: ctest --test-dir build --output-on-failure
+
+  engine-tests:
+    name: Engine (protocol + depacketiser)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install pytest pymobiledevice3
+      # Cross-checks the C++ depacketiser's Python twin against the upstream
+      # implementation it is derived from, and pins the wire-protocol numbers
+      # against src/wp/protocol.hpp.
+      - run: python -m pytest engine/tests -q
